@@ -20,7 +20,7 @@ FetchContent_MakeAvailable(glfw)
 FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.88
+        GIT_TAG docking
 )
 FetchContent_GetProperties(imgui)
 if (NOT imgui_POPULATED)
@@ -34,12 +34,13 @@ if (NOT imgui_POPULATED)
     target_link_libraries(imgui ${OPENGL_LIBRARIES} glfw glad)
 endif ()
 
-add_executable(gui imgui.cpp)
+add_executable(gui gui/imgui.cpp)
 target_link_libraries(gui PUBLIC imgui)
 
 FetchContent_Declare(
   nfd-extend
   GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
+  GIT_TAG v1.0.0
   )
 FetchContent_MakeAvailable(nfd-extend)
 message(STATUS ${nfd-extend_SOURCE_DIR})

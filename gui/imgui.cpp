@@ -8,6 +8,7 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include <stdexcept>
 #include <stdio.h>
 #if defined(IMGUI_IMPL_OPENGL_ES2)
 #include <GLES2/gl2.h>
@@ -25,9 +26,10 @@
 #pragma comment(lib, "legacy_stdio_definitions")
 #endif
 
-#include <nfd.h>
+#include <nfd.hpp>
 
 #include <filesystem>
+#include <iostream>
 
 static void glfw_error_callback(int error, const char *description) {
   fprintf(stderr, "Glfw Error %d: %s\n", error, description);
@@ -73,7 +75,12 @@ int main(int, char **) {
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
-  //   (void)io;
+  io.ConfigFlags |=
+      ImGuiConfigFlags_NavEnableKeyboard;           // Enable Keyboard Controls
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
+  // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Enable
+  // Multi-Viewport / Platform Windows
+
   // io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable
   // Keyboard Controls io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; //
   // Enable Gamepad Controls
@@ -120,6 +127,9 @@ int main(int, char **) {
   //   bool show_another_window = false;
   ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
+  // state
+  std::string currentFile;
+
   // Main loop
   while (!glfwWindowShouldClose(window)) {
     // Poll and handle events (inputs, window resize, etc.)
@@ -137,6 +147,48 @@ int main(int, char **) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+
+    // Create the docking environment
+    // ImGuiWindowFlags windowFlags =
+    //     ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+    //     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+    //     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+    //     ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
+    ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDocking;
+    windowFlags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+    windowFlags |=
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+
+    ImGuiViewport *viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin("DockSpace", nullptr, windowFlags);
+    ImGui::PopStyleVar(3);
+
+    // Submit the DockSpace
+    // ImGuiIO &io = ImGui::GetIO();
+    // if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable) {
+    //   ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+    //   ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
+    // } else {
+    //   throw std::runtime_error("No Dockmode");
+    // }
+
+    ImGuiID dockSpaceId = ImGui::GetID("DockSpace");
+
+    ImGui::DockSpace(dockSpaceId, ImVec2(0.0f, 0.0f),
+                     ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::End();
+
+    // ImGuiID dockMain = dockSpaceId;
+    // ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left,
+    // 0.40f, NULL, &dockMain);
 
     // if (ImGui::BeginMainMenuBar()) {
     //   if (ImGui::BeginMenu("File")) {
@@ -160,13 +212,38 @@ int main(int, char **) {
     //   ImGui::EndMainMenuBar();
     // }
 
-    ImGui::Begin("CGNS");
-    // ImGui::Text("Hello from another window!");
-    if (ImGui::Button("Open")) {
-      nfdchar_t *outPath = NULL;
-      nfdresult_t result = NFD_OpenDialog(&outPath, NULL, 0, NULL);
+    ImGui::SetNextWindowDockID(dockSpaceId, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Viewer")) {
     }
     ImGui::End();
+
+    ImGui::SetNextWindowDockID(dockSpaceId, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Properties")) {
+      if (ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::Button("Open")) {
+          NFD::Guard nfdGuard;
+          NFD::UniquePath outPath;
+          nfdfilteritem_t filterItem[1] = {{"CGNS", "cgns"}};
+
+          nfdresult_t result = NFD::OpenDialog(outPath, filterItem, 1);
+
+          if (result == NFD_OKAY) {
+            std::cout << "Success!" << std::endl << outPath.get() << std::endl;
+            currentFile = outPath.get();
+          } else if (result == NFD_CANCEL) {
+            std::cout << "User pressed cancel." << std::endl;
+          } else {
+            std::cout << "Error: " << NFD::GetError() << std::endl;
+          }
+        }
+        ImGui::SameLine(0, 5.0f);
+        ImGui::Text("%s", currentFile.c_str());
+      }
+    }
+    ImGui::End();
+
+    ImGui::SetNextWindowDockID(dockSpaceId, ImGuiCond_FirstUseEver);
+    ImGui::ShowDemoWindow();
 
     // 1. Show the big demo window (Most of the sample code is in
     // ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear
