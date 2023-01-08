@@ -5,9 +5,17 @@
 // + read the top of imgui.cpp. Read online:
 // https://github.com/ocornut/imgui/tree/master/docs
 
+#include "include/data.hpp"
+#include <glad/glad.h>
+
+#ifdef __APPLE__
+#define GL_SILENCE_DEPRECATION
+#endif
+
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "imgui_internal.h"
 #include <stdexcept>
 #include <stdio.h>
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -22,20 +30,33 @@
 // should not be affected, as you are likely to link with a newer binary of GLFW
 // that is adequate for your version of Visual Studio.
 #if defined(_MSC_VER) && (_MSC_VER >= 1900) &&                                 \
-    !defined(IMGUI_DISABLE_WIN32_FUNCTIONS)
+  !defined(IMGUI_DISABLE_WIN32_FUNCTIONS)
 #pragma comment(lib, "legacy_stdio_definitions")
 #endif
 
-#include <nfd.hpp>
-
 #include <filesystem>
 #include <iostream>
+#include <variant>
 
-static void glfw_error_callback(int error, const char *description) {
+#include <nfd.hpp>
+
+#include <cgns-tools.hpp>
+
+#include "include/frameBuffer.hpp"
+#include "include/helpers.hpp"
+#include "include/shader.hpp"
+
+// using cgns_tools::gui::opengl_fn;
+
+static void
+glfw_error_callback(int error, const char* description)
+{
   fprintf(stderr, "Glfw Error %d: %s\n", error, description);
 }
 
-int main(int, char **) {
+int
+main(int, char**)
+{
   // Setup window
   glfwSetErrorCallback(glfw_error_callback);
   if (!glfwInit())
@@ -44,20 +65,20 @@ int main(int, char **) {
     // Decide GL+GLSL versions
 #if defined(IMGUI_IMPL_OPENGL_ES2)
   // GL ES 2.0 + GLSL 100
-  const char *glsl_version = "#version 100";
+  const char* glsl_version = "#version 100";
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
   glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
 #elif defined(__APPLE__)
   // GL 3.2 + GLSL 150
-  const char *glsl_version = "#version 150";
+  const char* glsl_version = "#version 150";
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // 3.2+ only
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);           // Required on Mac
 #else
   // GL 3.0 + GLSL 130
-  const char *glsl_version = "#version 130";
+  const char* glsl_version = "#version 130";
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
   // glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+
@@ -65,7 +86,7 @@ int main(int, char **) {
 #endif
 
   // Create window with graphics context
-  GLFWwindow *window = glfwCreateWindow(1280, 720, "cgnstools", NULL, NULL);
+  GLFWwindow* window = glfwCreateWindow(1280, 720, "cgnstools", NULL, NULL);
   if (window == NULL)
     return 1;
   glfwMakeContextCurrent(window);
@@ -74,9 +95,9 @@ int main(int, char **) {
   // Setup Dear ImGui context
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
-  ImGuiIO &io = ImGui::GetIO();
+  ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |=
-      ImGuiConfigFlags_NavEnableKeyboard;           // Enable Keyboard Controls
+    ImGuiConfigFlags_NavEnableKeyboard;             // Enable Keyboard Controls
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
   // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Enable
   // Multi-Viewport / Platform Windows
@@ -111,9 +132,9 @@ int main(int, char **) {
   // io.Fonts->AddFontDefault();
 
   // construct font path
-  const std::filesystem::path file_path{__FILE__};
+  const std::filesystem::path file_path{ __FILE__ };
   const auto source_root_path = file_path.parent_path();
-  const std::filesystem::path source_font_path{"font/Inter-V.ttf"};
+  const std::filesystem::path source_font_path{ "font/Inter-V.ttf" };
   const auto font_path = source_root_path / source_font_path;
 
   io.Fonts->AddFontFromFileTTF(font_path.c_str(), 16.0f);
@@ -127,11 +148,23 @@ int main(int, char **) {
   //   bool show_another_window = false;
   ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
-  // state
-  std::string currentFile;
+  // initialize GLAD
+  if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+  {
+    std::cout << "Failed to initialize GLAD" << std::endl;
+    return -1;
+  }
+
+  cgns_tools::gui::data data{};
+
+  cgns_tools::gui::shader shader{};
+  // camera mCamera{ glm::vec3(0, 0, 3), 45.0f, 1.3f, 0.1f, 100.0f };
+
+  cgns_tools::gui::frameBuffer frameBuffer{};
 
   // Main loop
-  while (!glfwWindowShouldClose(window)) {
+  while (!glfwWindowShouldClose(window))
+  {
     // Poll and handle events (inputs, window resize, etc.)
     // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to
     // tell if dear imgui wants to use your inputs.
@@ -158,9 +191,9 @@ int main(int, char **) {
     windowFlags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
     windowFlags |=
-        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
 
-    ImGuiViewport *viewport = ImGui::GetMainViewport();
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
     ImGui::SetNextWindowViewport(viewport->ID);
@@ -171,24 +204,41 @@ int main(int, char **) {
     ImGui::Begin("DockSpace", nullptr, windowFlags);
     ImGui::PopStyleVar(3);
 
-    // Submit the DockSpace
-    // ImGuiIO &io = ImGui::GetIO();
-    // if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable) {
-    //   ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
-    //   ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
-    // } else {
-    //   throw std::runtime_error("No Dockmode");
-    // }
+    ImGuiDockNodeFlags dockspaceFlags = ImGuiDockNodeFlags_None;
+    ImGuiID dockspaceID = ImGui::GetID("DockSpace");
+    if (!ImGui::DockBuilderGetNode(dockspaceID))
+    {
+      ImGui::DockBuilderRemoveNode(dockspaceID);
+      ImGui::DockBuilderAddNode(dockspaceID, ImGuiDockNodeFlags_None);
 
-    ImGuiID dockSpaceId = ImGui::GetID("DockSpace");
+      ImGuiID dock_main_id = dockspaceID;
+      ImGuiID dock_up_id = ImGui::DockBuilderSplitNode(
+        dock_main_id, ImGuiDir_Up, 0.05f, nullptr, &dock_main_id);
+      ImGuiID dock_right_id = ImGui::DockBuilderSplitNode(
+        dock_main_id, ImGuiDir_Right, 0.2f, nullptr, &dock_main_id);
+      ImGuiID dock_left_id = ImGui::DockBuilderSplitNode(
+        dock_main_id, ImGuiDir_Left, 0.2f, nullptr, &dock_main_id);
+      ImGuiID dock_down_id = ImGui::DockBuilderSplitNode(
+        dock_main_id, ImGuiDir_Down, 0.2f, nullptr, &dock_main_id);
+      ImGuiID dock_down_right_id = ImGui::DockBuilderSplitNode(
+        dock_down_id, ImGuiDir_Right, 0.6f, nullptr, &dock_down_id);
 
-    ImGui::DockSpace(dockSpaceId, ImVec2(0.0f, 0.0f),
-                     ImGuiDockNodeFlags_PassthruCentralNode);
+      // ImGui::DockBuilderDockWindow("Actions", dock_up_id);
+      // ImGui::DockBuilderDockWindow("Hierarchy", dock_right_id);
+      ImGui::DockBuilderDockWindow("Properties", dock_left_id);
+      // ImGui::DockBuilderDockWindow("Console", dock_down_id);
+      ImGui::DockBuilderDockWindow("Dear ImGui Demo", dock_down_right_id);
+      ImGui::DockBuilderDockWindow("Viewer", dock_main_id);
+
+      ImGuiDockNode* node = ImGui::DockBuilderGetNode(dock_up_id);
+      node->LocalFlags |= (static_cast<int>(ImGuiDockNodeFlags_NoTabBar) |
+                           static_cast<int>(ImGuiDockNodeFlags_NoResize));
+
+      ImGui::DockBuilderFinish(dock_main_id);
+    }
+    ImGui::DockSpace(dockspaceID, ImVec2(0.0f, 0.0f), dockspaceFlags);
+
     ImGui::End();
-
-    // ImGuiID dockMain = dockSpaceId;
-    // ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left,
-    // 0.40f, NULL, &dockMain);
 
     // if (ImGui::BeginMainMenuBar()) {
     //   if (ImGui::BeginMenu("File")) {
@@ -212,105 +262,135 @@ int main(int, char **) {
     //   ImGui::EndMainMenuBar();
     // }
 
-    ImGui::SetNextWindowDockID(dockSpaceId, ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Viewer")) {
+    if (ImGui::Begin("Viewer"))
+    {
+
+      ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+      glm::vec2 mSize = { viewportPanelSize.x, viewportPanelSize.y };
+      const auto width = viewportPanelSize.x;
+      const auto height = viewportPanelSize.y;
+
+      // mCamera.set_aspect(mSize.x / mSize.y);
+      // mCamera.update(shader);
+
+      // sometimes at startup a height of zero is encountered
+      if (!frameBuffer.fits(width, height) && width > 0 && height > 0)
+      {
+        frameBuffer.resize(width, height);
+      }
+
+      frameBuffer.bind();
+
+      if (data)
+      {
+        data.render(shader);
+      }
+
+      frameBuffer.unbind();
+
+      // add rendered texture of frame buffer to current imgui window
+      ImGui::Image(reinterpret_cast<void*>(frameBuffer.get_texture()),
+                   ImVec2{ mSize.x, mSize.y },
+                   ImVec2{ 0, 1 },
+                   ImVec2{ 1, 0 });
     }
     ImGui::End();
 
-    ImGui::SetNextWindowDockID(dockSpaceId, ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Properties")) {
-      if (ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::Button("Open")) {
+    // ImGui::SetNextWindowDockID(dockspaceID, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Properties"))
+    {
+      if (ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen))
+      {
+        if (ImGui::Button("Open"))
+        {
           NFD::Guard nfdGuard;
           NFD::UniquePath outPath;
-          nfdfilteritem_t filterItem[1] = {{"CGNS", "cgns"}};
+          nfdfilteritem_t filterItem[1] = { { "CGNS", "cgns" } };
 
           nfdresult_t result = NFD::OpenDialog(outPath, filterItem, 1);
 
-          if (result == NFD_OKAY) {
+          if (result == NFD_OKAY)
+          {
             std::cout << "Success!" << std::endl << outPath.get() << std::endl;
-            currentFile = outPath.get();
-          } else if (result == NFD_CANCEL) {
+            data.loadFile(outPath.get());
+          }
+          else if (result == NFD_CANCEL)
+          {
             std::cout << "User pressed cancel." << std::endl;
-          } else {
+          }
+          else
+          {
             std::cout << "Error: " << NFD::GetError() << std::endl;
           }
         }
         ImGui::SameLine(0, 5.0f);
-        ImGui::Text("%s", currentFile.c_str());
+        ImGui::Text("%s", data.file().c_str());
+      }
+
+      if (data)
+      {
+        if (ImGui::TreeNodeEx("CGNS"))
+        {
+
+          for (const auto& base : data()->bases)
+          {
+            if (ImGui::TreeNodeEx(base.name.c_str()))
+            {
+
+              if (ImGui::TreeNodeEx("Zones"))
+              {
+
+                for (const auto& zone : base.zones)
+                {
+                  std::visit(
+                    [](auto&& zone)
+                    {
+                      if (ImGui::TreeNodeEx(zone.name.c_str()))
+                      {
+                        ImGui::TreePop();
+                      }
+                    },
+                    zone);
+                }
+
+                ImGui::TreePop();
+              }
+
+              if (ImGui::TreeNodeEx("Families"))
+              {
+
+                for (const auto& family : base.families)
+                {
+                  if (ImGui::TreeNodeEx(family.name.c_str()))
+                  {
+                    ImGui::TreePop();
+                  }
+                }
+
+                ImGui::TreePop();
+              }
+
+              ImGui::TreePop();
+            }
+          }
+
+          ImGui::TreePop();
+        }
       }
     }
     ImGui::End();
 
-    ImGui::SetNextWindowDockID(dockSpaceId, ImGuiCond_FirstUseEver);
     ImGui::ShowDemoWindow();
-
-    // 1. Show the big demo window (Most of the sample code is in
-    // ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear
-    // ImGui!).
-    // if (show_demo_window)
-    //   ImGui::ShowDemoWindow(&show_demo_window);
-
-    // // 2. Show a simple window that we create ourselves. We use a Begin/End
-    // pair
-    // // to created a named window.
-    // {
-    //   static float f = 0.0f;
-    //   static int counter = 0;
-
-    //   ImGui::Begin("Hello, world!"); // Create a window called "Hello,
-    //   world!"
-    //                                  // and append into it.
-
-    //   ImGui::Text("This is some useful text."); // Display some text (you can
-    //                                             // use a format strings too)
-    //   ImGui::Checkbox(
-    //       "Demo Window",
-    //       &show_demo_window); // Edit bools storing our window open/close
-    //       state
-    //   ImGui::Checkbox("Another Window", &show_another_window);
-
-    //   ImGui::SliderFloat("float", &f, 0.0f,
-    //                      1.0f); // Edit 1 float using a slider from 0.0f
-    //                      to 1.0f
-    //   ImGui::ColorEdit3(
-    //       "clear color",
-    //       (float *)&clear_color); // Edit 3 floats representing a color
-
-    //   if (ImGui::Button("Button")) // Buttons return true when clicked (most
-    //                                // widgets return true when
-    //                                edited/activated)
-    //     counter++;
-    //   ImGui::SameLine();
-    //   ImGui::Text("counter = %d", counter);
-
-    //   ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
-    //               1000.0f / ImGui::GetIO().Framerate,
-    //               ImGui::GetIO().Framerate);
-    //   ImGui::End();
-    // }
-
-    // // 3. Show another simple window.
-    // if (show_another_window) {
-    //   ImGui::Begin(
-    //       "Another Window",
-    //       &show_another_window); // Pass a pointer to our bool variable (the
-    //                              // window will have a closing button that
-    //                              will
-    //                              // clear the bool when clicked)
-    //   ImGui::Text("Hello from another window!");
-    //   if (ImGui::Button("Close Me"))
-    //     show_another_window = false;
-    //   ImGui::End();
-    // }
 
     // Rendering
     ImGui::Render();
     int display_w, display_h;
     glfwGetFramebufferSize(window, &display_w, &display_h);
     glViewport(0, 0, display_w, display_h);
-    glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w,
-                 clear_color.z * clear_color.w, clear_color.w);
+    glClearColor(clear_color.x * clear_color.w,
+                 clear_color.y * clear_color.w,
+                 clear_color.z * clear_color.w,
+                 clear_color.w);
     glClear(GL_COLOR_BUFFER_BIT);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
